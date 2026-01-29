@@ -2,6 +2,7 @@ const Parser = require('rss-parser');
 const { config } = require('../config');
 
 const parser = new Parser({
+    timeout: 10000,
     customFields: {
         item: [
             ['dc:creator', 'creator'],
@@ -10,12 +11,13 @@ const parser = new Parser({
     },
 });
 
-// List of Nitter instances (fallback if one is down)
+// List of Nitter/Twitter alternative instances (updated 2026)
+// xcancel.com is currently the most reliable
 const NITTER_INSTANCES = [
+    'https://xcancel.com',
     'https://nitter.privacydev.net',
     'https://nitter.poast.org',
-    'https://nitter.cz',
-    'https://nitter.1d4.us',
+    'https://nitter.net',
 ];
 
 let currentInstanceIndex = 0;
@@ -32,15 +34,15 @@ function getNitterInstance() {
  */
 function rotateInstance() {
     currentInstanceIndex = (currentInstanceIndex + 1) % NITTER_INSTANCES.length;
-    console.log(`🔄 Switched to Nitter instance: ${getNitterInstance()}`);
+    console.log(`🔄 Switched to instance: ${getNitterInstance()}`);
 }
 
 /**
  * Initialize Twitter client (no-op for Nitter, just log)
  */
 function initTwitterClient() {
-    console.log('✅ Twitter client initialized (using Nitter RSS - FREE, no API key needed!)');
-    console.log(`   📡 Using instance: ${getNitterInstance()}`);
+    console.log('✅ Twitter client initialized (using Nitter RSS alternatives)');
+    console.log(`   📡 Primary instance: ${getNitterInstance()}`);
     return true;
 }
 
@@ -88,7 +90,7 @@ async function getUserTweets(username, sinceId = null, maxResults = 10) {
 
             // Convert RSS items to tweet-like objects
             const tweets = feed.items.slice(0, maxResults).map((item) => {
-                // Extract tweet ID from link (e.g., https://nitter.net/user/status/123456)
+                // Extract tweet ID from link (e.g., https://xcancel.com/user/status/123456)
                 const tweetId = item.link?.split('/status/')?.pop()?.split('#')[0] || item.guid;
 
                 // Clean up the content (remove HTML tags)
@@ -137,16 +139,17 @@ async function getUserTweets(username, sinceId = null, maxResults = 10) {
             return {
                 data: filteredTweets,
                 includes: {
-                    users: [{ id: cleanUsername, username: cleanUsername, name: feed.title?.replace("'s mass posts", '') || cleanUsername }],
+                    users: [{ id: cleanUsername, username: cleanUsername, name: feed.title?.replace("'s posts", '') || cleanUsername }],
                 },
             };
         } catch (error) {
-            console.warn(`⚠️  Nitter instance ${getNitterInstance()} failed: ${error.message}`);
+            console.warn(`⚠️  Instance ${getNitterInstance()} failed: ${error.message}`);
             rotateInstance();
         }
     }
 
-    console.error('❌ All Nitter instances failed');
+    console.error('❌ All instances failed - Twitter alternatives may be down');
+    console.error('   Check https://status.d420.de for working instances');
     return { data: [], includes: {} };
 }
 
@@ -168,7 +171,7 @@ function extractMentions(text) {
  */
 async function searchTweets(query, sinceId = null, maxResults = 10) {
     // Nitter doesn't support search, return empty
-    console.warn('⚠️  Tweet search not available with Nitter (use user monitoring instead)');
+    console.warn('⚠️  Tweet search not available (use user monitoring instead)');
     return { data: [] };
 }
 
