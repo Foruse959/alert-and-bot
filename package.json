@@ -1,13 +1,14 @@
 {
   "name": "twitter-alert-bot",
   "version": "1.0.0",
-  "description": "Twitter monitoring bot with Telegram alerts - 100% FREE",
+  "description": "Twitter monitoring bot with Telegram alerts",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
+    "twitter-api-v2": "^1.15.0",
     "rss-parser": "^3.13.0",
     "node-telegram-bot-api": "^0.64.0",
     "sql.js": "^1.8.0",

@@ -1,12 +1,17 @@
 require('dotenv').config();
 
 const config = {
-    // Telegram Bot (ONLY REQUIRED CREDENTIAL!)
+    // Telegram Bot
     telegram: {
         botToken: process.env.TELEGRAM_BOT_TOKEN,
     },
 
-    // Polling interval (how often to check for new tweets)
+    // Twitter API
+    twitter: {
+        bearerToken: process.env.TWITTER_BEARER_TOKEN,
+    },
+
+    // Polling interval
     pollInterval: parseInt(process.env.POLL_INTERVAL) || 60000,
 
     // Database
@@ -21,16 +26,20 @@ function validateConfig() {
         errors.push('TELEGRAM_BOT_TOKEN is required');
     }
 
+    if (!config.twitter.bearerToken) {
+        errors.push('TWITTER_BEARER_TOKEN is required');
+    }
+
     if (errors.length > 0) {
         console.error('❌ Configuration errors:');
         errors.forEach(e => console.error(`   - ${e}`));
-        console.error('\n💡 Copy .env.example to .env and add your Telegram bot token');
-        console.error('   Get it FREE from @BotFather on Telegram!');
+        console.error('\n💡 Get your tokens:');
+        console.error('   Telegram: https://t.me/botfather (FREE)');
+        console.error('   Twitter:  https://developer.twitter.com (FREE tier available)');
         process.exit(1);
     }
 
     console.log('✅ Configuration validated');
-    console.log('   🆓 Using Nitter RSS (no Twitter API key needed!)');
     console.log(`   ⏱️  Poll interval: ${config.pollInterval / 1000} seconds`);
 }
 

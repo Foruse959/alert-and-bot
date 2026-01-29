@@ -67,9 +67,9 @@ async function checkAllWatchedAccounts() {
         try {
             await checkAccount(account);
             // Small delay between accounts to avoid rate limits
-            await sleep(1000);
+            await sleep(2000);
         } catch (error) {
-            console.error(`Error checking @${account.twitter_username}:`, error.message);
+            console.error(`❌ Error checking @${account.twitter_username}:`, error.message);
         }
     }
 }
@@ -83,16 +83,16 @@ async function checkAccount(account) {
     if (!userId) {
         const user = await twitter.getUserByUsername(account.twitter_username);
         if (!user) {
-            console.warn(`⚠️  Could not find Twitter user @${account.twitter_username}`);
+            console.warn(`⚠️  Could not find @${account.twitter_username}`);
             return;
         }
         userId = user.id;
-        // Update all entries with this user ID
-        db.addWatchedAccount(account.chat_id, account.twitter_username, userId);
     }
 
-    // Get last tweet ID for this account (global, not per-user)
+    // Get last tweet ID for this account
     const lastTweetId = db.getLastTweetId(account.twitter_username);
+
+    console.log(`   📥 Checking @${account.twitter_username}...`);
 
     // Fetch new tweets
     const result = await twitter.getUserTweets(userId, lastTweetId, 10);
@@ -101,12 +101,16 @@ async function checkAccount(account) {
         return;
     }
 
-    console.log(`📝 Found ${result.data.length} new tweets from @${account.twitter_username}`);
+    console.log(`   📝 Found ${result.data.length} new tweets from @${account.twitter_username}`);
 
     // Process tweets (oldest first)
     const tweets = [...result.data].reverse();
 
     for (const tweet of tweets) {
+        // Add link to tweet
+        tweet.link = `https://twitter.com/${account.twitter_username}/status/${tweet.id}`;
+        tweet.author_username = account.twitter_username;
+
         // Process tweet through filter engine
         const alerts = filterEngine.processTweetForAlerts(tweet, account.twitter_username);
 
@@ -115,9 +119,16 @@ async function checkAccount(account) {
             await dispatcher.sendAlert(alert);
             db.recordAlert(alert.chatId, tweet.id);
         }
+    }
 
-        // Update last tweet ID for all users watching this account
-        db.updateLastTweetId(account.chat_id, account.twitter_username, tweet.id);
+    // Update last tweet ID (use the newest tweet)
+    if (tweets.length > 0) {
+        const newestTweet = result.data[0];
+        // Update for all users watching this account
+        const watchers = db.getUsersWatchingAccount(account.twitter_username);
+        for (const watcher of watchers) {
+            db.updateLastTweetId(watcher.chat_id, account.twitter_username, newestTweet.id);
+        }
     }
 }
 

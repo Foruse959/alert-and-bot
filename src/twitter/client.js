@@ -1,202 +1,92 @@
-const Parser = require('rss-parser');
+const { TwitterApi } = require('twitter-api-v2');
 const { config } = require('../config');
 
-// Custom parser with browser-like headers to avoid blocking
-const parser = new Parser({
-    timeout: 15000,
-    headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache',
-    },
-    customFields: {
-        item: [
-            ['dc:creator', 'creator'],
-            ['pubDate', 'pubDate'],
-        ],
-    },
-});
-
-// List of Nitter/Twitter alternative instances (updated 2026)
-const NITTER_INSTANCES = [
-    'https://nitter.privacydev.net',
-    'https://nitter.poast.org',
-    'https://nitter.net',
-    'https://nitter.cz',
-    'https://xcancel.com',
-];
-
-let currentInstanceIndex = 0;
+let client = null;
 
 /**
- * Get current Nitter instance URL
- */
-function getNitterInstance() {
-    return NITTER_INSTANCES[currentInstanceIndex];
-}
-
-/**
- * Rotate to next Nitter instance (fallback)
- */
-function rotateInstance() {
-    currentInstanceIndex = (currentInstanceIndex + 1) % NITTER_INSTANCES.length;
-    console.log(`🔄 Switched to instance: ${getNitterInstance()}`);
-}
-
-/**
- * Initialize Twitter client (no-op for Nitter, just log)
+ * Initialize Twitter API client
  */
 function initTwitterClient() {
-    console.log('✅ Twitter client initialized (using Nitter RSS alternatives)');
-    console.log(`   📡 Primary instance: ${getNitterInstance()}`);
-    return true;
+    client = new TwitterApi(config.twitter.bearerToken);
+    console.log('✅ Twitter API client initialized');
+    return client;
 }
 
 /**
- * Get Nitter client (compatibility layer)
+ * Get Twitter client instance
  */
 function getTwitterClient() {
-    return { nitter: true };
+    if (!client) {
+        throw new Error('Twitter client not initialized. Call initTwitterClient() first.');
+    }
+    return client.readOnly;
 }
 
 /**
- * Get user info from username (simulated for Nitter)
+ * Get user by username
  */
 async function getUserByUsername(username) {
-    const cleanUsername = username.replace('@', '').toLowerCase();
+    try {
+        const cleanUsername = username.replace('@', '');
+        const user = await getTwitterClient().v2.userByUsername(cleanUsername, {
+            'user.fields': ['id', 'name', 'username', 'profile_image_url', 'verified'],
+        });
 
-    return {
-        id: cleanUsername,
-        username: cleanUsername,
-        name: cleanUsername,
-        verified: false,
-    };
-}
-
-/**
- * Fetch tweets from user via Nitter RSS
- */
-async function getUserTweets(username, sinceId = null, maxResults = 10) {
-    const cleanUsername = typeof username === 'string' ? username.replace('@', '') : username;
-
-    for (let attempt = 0; attempt < NITTER_INSTANCES.length; attempt++) {
-        try {
-            const instance = getNitterInstance();
-            const rssUrl = `${instance}/${cleanUsername}/rss`;
-
-            console.log(`   📥 Fetching: ${rssUrl}`);
-
-            const feed = await parser.parseURL(rssUrl);
-
-            if (!feed.items || feed.items.length === 0) {
-                console.log(`   ℹ️  No items in feed for @${cleanUsername}`);
-                return { data: [], includes: {} };
-            }
-
-            // Convert RSS items to tweet-like objects
-            const tweets = feed.items.slice(0, maxResults).map((item) => {
-                // Extract tweet ID from link
-                const tweetId = item.link?.split('/status/')?.pop()?.split('#')[0] || item.guid || Date.now().toString();
-
-                // Clean up the content (remove HTML tags)
-                let text = item.contentSnippet || item.content || item.title || '';
-                text = text.replace(/<[^>]*>/g, '').trim();
-
-                // Skip if text contains whitelist warning
-                if (text.includes('RSS reader not yet whitelist') || text.includes('whitelist')) {
-                    return null;
-                }
-
-                // Detect tweet type from content
-                let tweetType = 'original';
-                if (text.startsWith('RT @') || text.includes('RT by @')) {
-                    tweetType = 'retweet';
-                } else if (text.startsWith('R to @')) {
-                    tweetType = 'reply';
-                } else if (item.title?.includes('quoted')) {
-                    tweetType = 'quote';
-                }
-
-                return {
-                    id: tweetId,
-                    text: text,
-                    created_at: item.pubDate || item.isoDate,
-                    author_id: cleanUsername,
-                    author_username: cleanUsername,
-                    tweet_type: tweetType,
-                    link: item.link?.replace(instance, 'https://twitter.com') || `https://twitter.com/${cleanUsername}/status/${tweetId}`,
-                    referenced_tweets: tweetType !== 'original' ? [{ type: tweetType === 'retweet' ? 'retweeted' : tweetType === 'reply' ? 'replied_to' : 'quoted' }] : null,
-                    entities: {
-                        mentions: extractMentions(text),
-                    },
-                };
-            }).filter(Boolean); // Remove null entries (whitelist warnings)
-
-            // Filter by sinceId if provided
-            let filteredTweets = tweets;
-            if (sinceId) {
-                try {
-                    const sinceIdNum = BigInt(sinceId);
-                    filteredTweets = tweets.filter((t) => {
-                        try {
-                            return BigInt(t.id) > sinceIdNum;
-                        } catch {
-                            return true;
-                        }
-                    });
-                } catch {
-                    // If sinceId parsing fails, return all tweets
-                }
-            }
-
-            console.log(`   ✅ Got ${filteredTweets.length} tweets from ${instance}`);
-
-            return {
-                data: filteredTweets,
-                includes: {
-                    users: [{ id: cleanUsername, username: cleanUsername, name: feed.title?.replace("'s posts", '') || cleanUsername }],
-                },
-            };
-        } catch (error) {
-            console.warn(`⚠️  Instance ${getNitterInstance()} failed: ${error.message}`);
-            rotateInstance();
+        if (!user.data) {
+            console.warn(`⚠️  User @${cleanUsername} not found`);
+            return null;
         }
-    }
 
-    console.error('❌ All instances failed');
-    return { data: [], includes: {} };
+        return user.data;
+    } catch (error) {
+        console.error(`❌ Error fetching user @${username}:`, error.message);
+        return null;
+    }
 }
 
 /**
- * Extract @mentions from text
+ * Get recent tweets from a user
  */
-function extractMentions(text) {
-    const mentions = [];
-    const regex = /@(\w+)/g;
-    let match;
-    while ((match = regex.exec(text)) !== null) {
-        mentions.push({ username: match[1] });
-    }
-    return mentions;
-}
+async function getUserTweets(userId, sinceId = null, maxResults = 10) {
+    try {
+        const params = {
+            max_results: Math.min(maxResults, 100),
+            'tweet.fields': ['id', 'text', 'created_at', 'author_id', 'referenced_tweets', 'entities'],
+            'user.fields': ['username', 'name'],
+            'expansions': ['author_id', 'referenced_tweets.id'],
+            exclude: ['replies'], // Exclude replies by default
+        };
 
-/**
- * Search tweets (not available with Nitter)
- */
-async function searchTweets(query, sinceId = null, maxResults = 10) {
-    console.warn('⚠️  Tweet search not available (use user monitoring instead)');
-    return { data: [] };
+        if (sinceId) {
+            params.since_id = sinceId;
+        }
+
+        const tweets = await getTwitterClient().v2.userTimeline(userId, params);
+
+        if (!tweets.data || !tweets.data.data) {
+            return { data: [], includes: tweets.data?.includes || {} };
+        }
+
+        console.log(`   ✅ Fetched ${tweets.data.data.length} tweets`);
+
+        return {
+            data: tweets.data.data,
+            includes: tweets.data.includes || {},
+        };
+    } catch (error) {
+        if (error.code === 429) {
+            console.warn('⚠️  Rate limit reached, waiting...');
+        } else {
+            console.error(`❌ Error fetching tweets:`, error.message);
+        }
+        return { data: [], includes: {} };
+    }
 }
 
 /**
  * Get tweet type from tweet object
  */
 function getTweetType(tweet) {
-    if (tweet.tweet_type) {
-        return tweet.tweet_type;
-    }
-
     if (!tweet.referenced_tweets || tweet.referenced_tweets.length === 0) {
         return 'original';
     }
@@ -226,6 +116,30 @@ function hasMentions(tweet) {
  */
 function getMentions(tweet) {
     return tweet.entities?.mentions?.map((m) => m.username) || [];
+}
+
+/**
+ * Search tweets (for keyword monitoring)
+ */
+async function searchTweets(query, sinceId = null, maxResults = 10) {
+    try {
+        const params = {
+            max_results: Math.min(maxResults, 100),
+            'tweet.fields': ['id', 'text', 'created_at', 'author_id'],
+            'user.fields': ['username', 'name'],
+            'expansions': ['author_id'],
+        };
+
+        if (sinceId) {
+            params.since_id = sinceId;
+        }
+
+        const tweets = await getTwitterClient().v2.search(query, params);
+        return tweets;
+    } catch (error) {
+        console.error(`❌ Error searching tweets:`, error.message);
+        return { data: [] };
+    }
 }
 
 module.exports = {
