@@ -11,18 +11,59 @@ async function initTwitterClient() {
     try {
         scraper = new Scraper();
 
-        // Try to login if credentials provided
-        if (config.twitter.username && config.twitter.password) {
-            console.log('   🔑 Logging in to Twitter...');
+        // Try cookie-based auth first (most reliable)
+        if (config.twitter.authToken && config.twitter.ct0) {
+            console.log('   🍪 Setting up cookie authentication...');
             try {
-                await scraper.login(config.twitter.username, config.twitter.password);
+                await scraper.setCookies([
+                    {
+                        name: 'auth_token',
+                        value: config.twitter.authToken,
+                        domain: '.twitter.com',
+                        path: '/',
+                        secure: true,
+                        httpOnly: true,
+                    },
+                    {
+                        name: 'ct0',
+                        value: config.twitter.ct0,
+                        domain: '.twitter.com',
+                        path: '/',
+                        secure: true,
+                        httpOnly: false,
+                    },
+                ]);
+
+                // Verify login worked
+                const isValid = await scraper.isLoggedIn();
+                if (isValid) {
+                    isLoggedIn = true;
+                    console.log('   ✅ Cookie authentication successful');
+                } else {
+                    console.warn('   ⚠️  Cookies may be expired, trying guest mode...');
+                }
+            } catch (cookieError) {
+                console.warn('   ⚠️  Cookie auth failed:', cookieError.message);
+            }
+        }
+        // Try username/password auth as fallback
+        else if (config.twitter.username && config.twitter.password) {
+            console.log('   🔑 Trying password login...');
+            try {
+                await scraper.login(
+                    config.twitter.username,
+                    config.twitter.password,
+                    config.twitter.email
+                );
                 isLoggedIn = true;
                 console.log('   ✅ Logged in as @' + config.twitter.username);
             } catch (loginError) {
-                console.warn('   ⚠️  Login failed:', loginError.message);
-                console.log('   📡 Continuing in guest mode...');
+                console.warn('   ⚠️  Password login failed:', loginError.message);
+                console.log('   💡 Tip: Use cookie auth instead (see .env.example)');
             }
-        } else {
+        }
+
+        if (!isLoggedIn) {
             console.log('   📡 Running in guest mode (limited access)');
         }
 
@@ -30,7 +71,6 @@ async function initTwitterClient() {
         return true;
     } catch (error) {
         console.error('⚠️  Twitter scraper init error:', error.message);
-        console.log('   Continuing with limited functionality...');
         scraper = new Scraper();
         return true;
     }
@@ -66,7 +106,12 @@ async function getUserByUsername(username) {
             verified: profile.isVerified || false,
         };
     } catch (error) {
-        console.error(`❌ Error fetching user @${username}:`, error.message);
+        // Don't spam logs for common errors
+        if (error.message?.includes('34') || error.message?.includes('not found')) {
+            console.warn(`⚠️  User @${username} not found or private`);
+        } else {
+            console.error(`❌ Error fetching @${username}:`, error.message);
+        }
         return null;
     }
 }
@@ -80,7 +125,6 @@ async function getUserTweets(username, sinceId = null, maxResults = 10) {
 
         console.log(`   📥 Fetching tweets from @${cleanUsername}...`);
 
-        // Get tweets using the scraper
         const tweetsIterator = scraper.getTweets(cleanUsername, maxResults);
         const tweets = [];
 
@@ -99,7 +143,6 @@ async function getUserTweets(username, sinceId = null, maxResults = 10) {
                 author_id: cleanUsername,
                 author_username: cleanUsername,
                 link: `https://twitter.com/${cleanUsername}/status/${tweet.id}`,
-                // Detect tweet type
                 tweet_type: detectTweetType(tweet),
                 referenced_tweets: tweet.isRetweet ? [{ type: 'retweeted' }] :
                     tweet.isQuoted ? [{ type: 'quoted' }] :
@@ -151,13 +194,8 @@ function extractMentions(text) {
  * Get tweet type from tweet object
  */
 function getTweetType(tweet) {
-    if (tweet.tweet_type) {
-        return tweet.tweet_type;
-    }
-
-    if (!tweet.referenced_tweets || tweet.referenced_tweets.length === 0) {
-        return 'original';
-    }
+    if (tweet.tweet_type) return tweet.tweet_type;
+    if (!tweet.referenced_tweets || tweet.referenced_tweets.length === 0) return 'original';
 
     const refType = tweet.referenced_tweets[0].type;
     switch (refType) {

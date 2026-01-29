@@ -6,10 +6,15 @@ const config = {
         botToken: process.env.TELEGRAM_BOT_TOKEN,
     },
 
-    // Twitter Account (for scraping)
+    // Twitter Authentication
     twitter: {
+        // Cookie-based auth (recommended)
+        authToken: process.env.TWITTER_AUTH_TOKEN || null,
+        ct0: process.env.TWITTER_CT0 || null,
+        // Password-based auth (fallback)
         username: process.env.TWITTER_USERNAME || null,
         password: process.env.TWITTER_PASSWORD || null,
+        email: process.env.TWITTER_EMAIL || null,
     },
 
     // Polling interval
@@ -30,10 +35,12 @@ function validateConfig() {
     console.log('✅ Configuration validated');
     console.log(`   ⏱️  Poll interval: ${config.pollInterval / 1000} seconds`);
 
-    if (config.twitter.username && config.twitter.password) {
-        console.log(`   🐦 Twitter account: @${config.twitter.username}`);
+    if (config.twitter.authToken && config.twitter.ct0) {
+        console.log('   🍪 Twitter auth: Using cookies (recommended)');
+    } else if (config.twitter.username && config.twitter.password) {
+        console.log(`   🔑 Twitter auth: Using password for @${config.twitter.username}`);
     } else {
-        console.log('   ⚠️  No Twitter credentials - using guest mode (may be limited)');
+        console.log('   ⚠️  No Twitter auth - guest mode may have limited access');
     }
 }
 
