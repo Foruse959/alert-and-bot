@@ -1,8 +1,15 @@
 const Parser = require('rss-parser');
 const { config } = require('../config');
 
+// Custom parser with browser-like headers to avoid blocking
 const parser = new Parser({
-    timeout: 10000,
+    timeout: 15000,
+    headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+    },
     customFields: {
         item: [
             ['dc:creator', 'creator'],
@@ -12,12 +19,12 @@ const parser = new Parser({
 });
 
 // List of Nitter/Twitter alternative instances (updated 2026)
-// xcancel.com is currently the most reliable
 const NITTER_INSTANCES = [
-    'https://xcancel.com',
     'https://nitter.privacydev.net',
     'https://nitter.poast.org',
     'https://nitter.net',
+    'https://nitter.cz',
+    'https://xcancel.com',
 ];
 
 let currentInstanceIndex = 0;
@@ -59,13 +66,11 @@ function getTwitterClient() {
 async function getUserByUsername(username) {
     const cleanUsername = username.replace('@', '').toLowerCase();
 
-    // For Nitter, we just return a basic user object
-    // The RSS feed will confirm if the user exists when we fetch tweets
     return {
-        id: cleanUsername, // Use username as ID for Nitter
+        id: cleanUsername,
         username: cleanUsername,
         name: cleanUsername,
-        verified: false, // Nitter doesn't expose this easily
+        verified: false,
     };
 }
 
@@ -85,17 +90,23 @@ async function getUserTweets(username, sinceId = null, maxResults = 10) {
             const feed = await parser.parseURL(rssUrl);
 
             if (!feed.items || feed.items.length === 0) {
+                console.log(`   ℹ️  No items in feed for @${cleanUsername}`);
                 return { data: [], includes: {} };
             }
 
             // Convert RSS items to tweet-like objects
             const tweets = feed.items.slice(0, maxResults).map((item) => {
-                // Extract tweet ID from link (e.g., https://xcancel.com/user/status/123456)
-                const tweetId = item.link?.split('/status/')?.pop()?.split('#')[0] || item.guid;
+                // Extract tweet ID from link
+                const tweetId = item.link?.split('/status/')?.pop()?.split('#')[0] || item.guid || Date.now().toString();
 
                 // Clean up the content (remove HTML tags)
                 let text = item.contentSnippet || item.content || item.title || '';
                 text = text.replace(/<[^>]*>/g, '').trim();
+
+                // Skip if text contains whitelist warning
+                if (text.includes('RSS reader not yet whitelist') || text.includes('whitelist')) {
+                    return null;
+                }
 
                 // Detect tweet type from content
                 let tweetType = 'original';
@@ -115,26 +126,31 @@ async function getUserTweets(username, sinceId = null, maxResults = 10) {
                     author_username: cleanUsername,
                     tweet_type: tweetType,
                     link: item.link?.replace(instance, 'https://twitter.com') || `https://twitter.com/${cleanUsername}/status/${tweetId}`,
-                    // For filtering
                     referenced_tweets: tweetType !== 'original' ? [{ type: tweetType === 'retweet' ? 'retweeted' : tweetType === 'reply' ? 'replied_to' : 'quoted' }] : null,
                     entities: {
                         mentions: extractMentions(text),
                     },
                 };
-            });
+            }).filter(Boolean); // Remove null entries (whitelist warnings)
 
             // Filter by sinceId if provided
             let filteredTweets = tweets;
             if (sinceId) {
-                const sinceIdNum = BigInt(sinceId);
-                filteredTweets = tweets.filter((t) => {
-                    try {
-                        return BigInt(t.id) > sinceIdNum;
-                    } catch {
-                        return true; // If ID comparison fails, include the tweet
-                    }
-                });
+                try {
+                    const sinceIdNum = BigInt(sinceId);
+                    filteredTweets = tweets.filter((t) => {
+                        try {
+                            return BigInt(t.id) > sinceIdNum;
+                        } catch {
+                            return true;
+                        }
+                    });
+                } catch {
+                    // If sinceId parsing fails, return all tweets
+                }
             }
+
+            console.log(`   ✅ Got ${filteredTweets.length} tweets from ${instance}`);
 
             return {
                 data: filteredTweets,
@@ -148,8 +164,7 @@ async function getUserTweets(username, sinceId = null, maxResults = 10) {
         }
     }
 
-    console.error('❌ All instances failed - Twitter alternatives may be down');
-    console.error('   Check https://status.d420.de for working instances');
+    console.error('❌ All instances failed');
     return { data: [], includes: {} };
 }
 
@@ -167,10 +182,9 @@ function extractMentions(text) {
 }
 
 /**
- * Search tweets (limited with Nitter - uses user timeline instead)
+ * Search tweets (not available with Nitter)
  */
 async function searchTweets(query, sinceId = null, maxResults = 10) {
-    // Nitter doesn't support search, return empty
     console.warn('⚠️  Tweet search not available (use user monitoring instead)');
     return { data: [] };
 }
@@ -179,7 +193,6 @@ async function searchTweets(query, sinceId = null, maxResults = 10) {
  * Get tweet type from tweet object
  */
 function getTweetType(tweet) {
-    // If tweet_type is already set (from Nitter), use it
     if (tweet.tweet_type) {
         return tweet.tweet_type;
     }
