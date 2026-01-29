@@ -1,25 +1,49 @@
-const { TwitterApi } = require('twitter-api-v2');
+const { Scraper } = require('@the-convocation/twitter-scraper');
 const { config } = require('../config');
 
-let client = null;
+let scraper = null;
+let isLoggedIn = false;
 
 /**
- * Initialize Twitter API client
+ * Initialize the Twitter scraper
  */
-function initTwitterClient() {
-    client = new TwitterApi(config.twitter.bearerToken);
-    console.log('✅ Twitter API client initialized');
-    return client;
+async function initTwitterClient() {
+    try {
+        scraper = new Scraper();
+
+        // Try to login if credentials provided
+        if (config.twitter.username && config.twitter.password) {
+            console.log('   🔑 Logging in to Twitter...');
+            try {
+                await scraper.login(config.twitter.username, config.twitter.password);
+                isLoggedIn = true;
+                console.log('   ✅ Logged in as @' + config.twitter.username);
+            } catch (loginError) {
+                console.warn('   ⚠️  Login failed:', loginError.message);
+                console.log('   📡 Continuing in guest mode...');
+            }
+        } else {
+            console.log('   📡 Running in guest mode (limited access)');
+        }
+
+        console.log('✅ Twitter scraper initialized');
+        return true;
+    } catch (error) {
+        console.error('⚠️  Twitter scraper init error:', error.message);
+        console.log('   Continuing with limited functionality...');
+        scraper = new Scraper();
+        return true;
+    }
 }
 
 /**
- * Get Twitter client instance
+ * Get scraper instance
  */
 function getTwitterClient() {
-    if (!client) {
-        throw new Error('Twitter client not initialized. Call initTwitterClient() first.');
+    if (!scraper) {
+        throw new Error('Scraper not initialized. Call initTwitterClient() first.');
     }
-    return client.readOnly;
+    return scraper;
 }
 
 /**
@@ -28,16 +52,19 @@ function getTwitterClient() {
 async function getUserByUsername(username) {
     try {
         const cleanUsername = username.replace('@', '');
-        const user = await getTwitterClient().v2.userByUsername(cleanUsername, {
-            'user.fields': ['id', 'name', 'username', 'profile_image_url', 'verified'],
-        });
+        const profile = await scraper.getProfile(cleanUsername);
 
-        if (!user.data) {
+        if (!profile) {
             console.warn(`⚠️  User @${cleanUsername} not found`);
             return null;
         }
 
-        return user.data;
+        return {
+            id: profile.userId || cleanUsername,
+            username: profile.username || cleanUsername,
+            name: profile.name || cleanUsername,
+            verified: profile.isVerified || false,
+        };
     } catch (error) {
         console.error(`❌ Error fetching user @${username}:`, error.message);
         return null;
@@ -47,60 +74,97 @@ async function getUserByUsername(username) {
 /**
  * Get recent tweets from a user
  */
-async function getUserTweets(userId, sinceId = null, maxResults = 10) {
+async function getUserTweets(username, sinceId = null, maxResults = 10) {
     try {
-        const params = {
-            max_results: Math.min(maxResults, 100),
-            'tweet.fields': ['id', 'text', 'created_at', 'author_id', 'referenced_tweets', 'entities'],
-            'user.fields': ['username', 'name'],
-            'expansions': ['author_id', 'referenced_tweets.id'],
-            exclude: ['replies'], // Exclude replies by default
-        };
+        const cleanUsername = typeof username === 'string' ? username.replace('@', '') : username;
 
-        if (sinceId) {
-            params.since_id = sinceId;
+        console.log(`   📥 Fetching tweets from @${cleanUsername}...`);
+
+        // Get tweets using the scraper
+        const tweetsIterator = scraper.getTweets(cleanUsername, maxResults);
+        const tweets = [];
+
+        for await (const tweet of tweetsIterator) {
+            if (tweets.length >= maxResults) break;
+
+            // Skip if we've already seen this tweet
+            if (sinceId && tweet.id && tweet.id <= sinceId) {
+                continue;
+            }
+
+            tweets.push({
+                id: tweet.id || Date.now().toString(),
+                text: tweet.text || '',
+                created_at: tweet.timeParsed || new Date().toISOString(),
+                author_id: cleanUsername,
+                author_username: cleanUsername,
+                link: `https://twitter.com/${cleanUsername}/status/${tweet.id}`,
+                // Detect tweet type
+                tweet_type: detectTweetType(tweet),
+                referenced_tweets: tweet.isRetweet ? [{ type: 'retweeted' }] :
+                    tweet.isQuoted ? [{ type: 'quoted' }] :
+                        tweet.isReply ? [{ type: 'replied_to' }] : null,
+                entities: {
+                    mentions: extractMentions(tweet.text || ''),
+                },
+            });
         }
 
-        const tweets = await getTwitterClient().v2.userTimeline(userId, params);
-
-        if (!tweets.data || !tweets.data.data) {
-            return { data: [], includes: tweets.data?.includes || {} };
-        }
-
-        console.log(`   ✅ Fetched ${tweets.data.data.length} tweets`);
+        console.log(`   ✅ Got ${tweets.length} tweets from @${cleanUsername}`);
 
         return {
-            data: tweets.data.data,
-            includes: tweets.data.includes || {},
+            data: tweets,
+            includes: {
+                users: [{ id: cleanUsername, username: cleanUsername }],
+            },
         };
     } catch (error) {
-        if (error.code === 429) {
-            console.warn('⚠️  Rate limit reached, waiting...');
-        } else {
-            console.error(`❌ Error fetching tweets:`, error.message);
-        }
+        console.error(`❌ Error fetching tweets from @${username}:`, error.message);
         return { data: [], includes: {} };
     }
+}
+
+/**
+ * Detect tweet type
+ */
+function detectTweetType(tweet) {
+    if (tweet.isRetweet) return 'retweet';
+    if (tweet.isQuoted) return 'quote';
+    if (tweet.isReply) return 'reply';
+    return 'original';
+}
+
+/**
+ * Extract @mentions from text
+ */
+function extractMentions(text) {
+    const mentions = [];
+    const regex = /@(\w+)/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        mentions.push({ username: match[1] });
+    }
+    return mentions;
 }
 
 /**
  * Get tweet type from tweet object
  */
 function getTweetType(tweet) {
+    if (tweet.tweet_type) {
+        return tweet.tweet_type;
+    }
+
     if (!tweet.referenced_tweets || tweet.referenced_tweets.length === 0) {
         return 'original';
     }
 
     const refType = tweet.referenced_tweets[0].type;
     switch (refType) {
-        case 'retweeted':
-            return 'retweet';
-        case 'quoted':
-            return 'quote';
-        case 'replied_to':
-            return 'reply';
-        default:
-            return 'original';
+        case 'retweeted': return 'retweet';
+        case 'quoted': return 'quote';
+        case 'replied_to': return 'reply';
+        default: return 'original';
     }
 }
 
@@ -119,23 +183,24 @@ function getMentions(tweet) {
 }
 
 /**
- * Search tweets (for keyword monitoring)
+ * Search tweets (requires login)
  */
 async function searchTweets(query, sinceId = null, maxResults = 10) {
-    try {
-        const params = {
-            max_results: Math.min(maxResults, 100),
-            'tweet.fields': ['id', 'text', 'created_at', 'author_id'],
-            'user.fields': ['username', 'name'],
-            'expansions': ['author_id'],
-        };
+    if (!isLoggedIn) {
+        console.warn('⚠️  Tweet search requires login');
+        return { data: [] };
+    }
 
-        if (sinceId) {
-            params.since_id = sinceId;
+    try {
+        const tweets = [];
+        const searchIterator = scraper.searchTweets(query, maxResults);
+
+        for await (const tweet of searchIterator) {
+            if (tweets.length >= maxResults) break;
+            tweets.push(tweet);
         }
 
-        const tweets = await getTwitterClient().v2.search(query, params);
-        return tweets;
+        return { data: tweets };
     } catch (error) {
         console.error(`❌ Error searching tweets:`, error.message);
         return { data: [] };

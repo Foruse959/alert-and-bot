@@ -6,9 +6,10 @@ const config = {
         botToken: process.env.TELEGRAM_BOT_TOKEN,
     },
 
-    // Twitter API
+    // Twitter Account (for scraping)
     twitter: {
-        bearerToken: process.env.TWITTER_BEARER_TOKEN,
+        username: process.env.TWITTER_USERNAME || null,
+        password: process.env.TWITTER_PASSWORD || null,
     },
 
     // Polling interval
@@ -20,27 +21,20 @@ const config = {
 
 // Validate required config
 function validateConfig() {
-    const errors = [];
-
     if (!config.telegram.botToken) {
-        errors.push('TELEGRAM_BOT_TOKEN is required');
-    }
-
-    if (!config.twitter.bearerToken) {
-        errors.push('TWITTER_BEARER_TOKEN is required');
-    }
-
-    if (errors.length > 0) {
-        console.error('❌ Configuration errors:');
-        errors.forEach(e => console.error(`   - ${e}`));
-        console.error('\n💡 Get your tokens:');
-        console.error('   Telegram: https://t.me/botfather (FREE)');
-        console.error('   Twitter:  https://developer.twitter.com (FREE tier available)');
+        console.error('❌ TELEGRAM_BOT_TOKEN is required');
+        console.error('   Get it free from: https://t.me/botfather');
         process.exit(1);
     }
 
     console.log('✅ Configuration validated');
     console.log(`   ⏱️  Poll interval: ${config.pollInterval / 1000} seconds`);
+
+    if (config.twitter.username && config.twitter.password) {
+        console.log(`   🐦 Twitter account: @${config.twitter.username}`);
+    } else {
+        console.log('   ⚠️  No Twitter credentials - using guest mode (may be limited)');
+    }
 }
 
 module.exports = { config, validateConfig };

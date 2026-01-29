@@ -20,7 +20,7 @@ async function handleStart(bot, msg) {
 
 Welcome, <b>${username}</b>! I'll monitor Twitter and send you instant alerts.
 
-🆓 <i>No Twitter API needed - uses Nitter RSS!</i>
+🆓 <i>No Twitter API key needed!</i>
 
 <b>Quick Start:</b>
 1️⃣ Add accounts: <code>/add @username</code>
@@ -389,7 +389,7 @@ async function handleStatus(bot, msg) {
     message += `<b>Monitoring:</b> ${accounts.length} account(s)\n`;
     message += `<b>Keywords:</b> ${keywords.length} keyword(s)\n`;
     message += `<b>Alerts:</b> ${settings?.is_paused ? '⏸️ Paused' : '▶️ Active'}\n`;
-    message += `<b>Method:</b> Nitter RSS (FREE)\n\n`;
+    message += `<b>Method:</b> Twitter Scraper (FREE)\n\n`;
     message += `🟢 Bot is running`;
 
     await bot.sendMessage(chatId, message, { parse_mode: 'HTML' });

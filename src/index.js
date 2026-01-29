@@ -1,8 +1,8 @@
 /**
  * Twitter Alert Bot
  * 
- * Monitors Twitter accounts via Nitter RSS and sends alerts to Telegram.
- * 100% FREE - No Twitter API key required!
+ * Monitors Twitter accounts and sends alerts to Telegram.
+ * FREE - No Twitter API key required! Uses open-source scraping.
  */
 
 const { config, validateConfig } = require('./config');
@@ -15,7 +15,7 @@ const monitor = require('./twitter/monitor');
 const banner = `
 ╔════════════════════════════════════════════════╗
 ║     🐦 Twitter Alert Bot v1.0.0                ║
-║     FREE - Using Nitter RSS (No API needed!)   ║
+║     FREE - No API Key Required!                ║
 ╚════════════════════════════════════════════════╝
 `;
 
@@ -25,11 +25,11 @@ async function main() {
     // Validate configuration
     validateConfig();
 
-    // Initialize database (async for sql.js)
+    // Initialize database
     await db.initDatabase();
 
-    // Initialize Twitter client (Nitter RSS)
-    twitter.initTwitterClient();
+    // Initialize Twitter scraper
+    await twitter.initTwitterClient();
 
     // Initialize Telegram bot
     telegramBot.initTelegramBot();
@@ -45,19 +45,15 @@ async function main() {
     console.log('\n🚀 Bot is running! Open Telegram and send /start to begin.\n');
 
     // Graceful shutdown
-    process.on('SIGINT', () => {
-        console.log('\n\n👋 Shutting down...');
-        db.saveDatabase();
-        monitor.stopMonitoring();
-        process.exit(0);
-    });
+    process.on('SIGINT', shutdown);
+    process.on('SIGTERM', shutdown);
+}
 
-    process.on('SIGTERM', () => {
-        console.log('\n\n👋 Shutting down...');
-        db.saveDatabase();
-        monitor.stopMonitoring();
-        process.exit(0);
-    });
+function shutdown() {
+    console.log('\n\n👋 Shutting down...');
+    db.saveDatabase();
+    monitor.stopMonitoring();
+    process.exit(0);
 }
 
 // Run the bot
