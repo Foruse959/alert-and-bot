@@ -25,8 +25,8 @@ async function main() {
     // Validate configuration
     validateConfig();
 
-    // Initialize database
-    db.initDatabase();
+    // Initialize database (async for sql.js)
+    await db.initDatabase();
 
     // Initialize Twitter client (Nitter RSS)
     twitter.initTwitterClient();
@@ -47,12 +47,14 @@ async function main() {
     // Graceful shutdown
     process.on('SIGINT', () => {
         console.log('\n\n👋 Shutting down...');
+        db.saveDatabase();
         monitor.stopMonitoring();
         process.exit(0);
     });
 
     process.on('SIGTERM', () => {
         console.log('\n\n👋 Shutting down...');
+        db.saveDatabase();
         monitor.stopMonitoring();
         process.exit(0);
     });
