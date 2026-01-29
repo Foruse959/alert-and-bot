@@ -85,29 +85,29 @@ async function handleHelp(bot, msg) {
 // =====================
 async function handleAdd(bot, msg, match) {
     const chatId = msg.chat.id;
-    const username = match[1]?.replace('@', '').trim();
+    const username = match[1]?.replace('@', '').trim().toLowerCase();
 
     if (!username) {
         await bot.sendMessage(chatId, '❌ Please specify a Twitter username.\nExample: <code>/add @elonmusk</code>', { parse_mode: 'HTML' });
         return;
     }
 
-    await bot.sendMessage(chatId, `🔍 Adding @${username}...`);
-
-    const twitterUser = await twitter.getUserByUsername(username);
-
-    if (!twitterUser) {
-        await bot.sendMessage(chatId, `❌ Could not verify @${username}. The account may be private or suspended.`);
+    // Validate username format
+    if (!/^[a-z0-9_]{1,15}$/i.test(username)) {
+        await bot.sendMessage(chatId, '❌ Invalid username format. Twitter usernames are 1-15 characters, letters, numbers, and underscores only.');
         return;
     }
 
-    // Add to database
+    await bot.sendMessage(chatId, `🔍 Adding @${username}...`);
+
+    // Skip verification - just add directly (guest mode can't verify profiles)
     db.createUser(chatId, msg.from.username);
-    db.addWatchedAccount(chatId, username, twitterUser.id);
+    db.addWatchedAccount(chatId, username, username);
 
     await bot.sendMessage(chatId,
-        `✅ <b>Now watching:</b> @${twitterUser.username}\n\n` +
+        `✅ <b>Now watching:</b> @${username}\n\n` +
         `You'll receive alerts when they tweet.\n` +
+        `⚠️ <i>Note: If the account doesn't exist or is private, no alerts will be sent.</i>\n` +
         `Use /settings to customize alert types.`,
         { parse_mode: 'HTML' }
     );
