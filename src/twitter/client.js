@@ -1,4 +1,4 @@
-const { Scraper } = require('@the-convocation/twitter-scraper');
+const { Scraper } = require('agent-twitter-client');
 const { config } = require('../config');
 
 let scraper = null;
@@ -11,49 +11,42 @@ async function initTwitterClient() {
     try {
         scraper = new Scraper();
 
-        // Try cookie-based auth first (most reliable)
+        // 1. Try Cookie Auth (Preferred)
         if (config.twitter.authToken && config.twitter.ct0) {
-            console.log('   🍪 Setting up cookie authentication...');
+            console.log('   🍪 Setting up cookies...');
             try {
-                // Format cookies as strings
-                const cookies = [
+                // Agent-twitter-client prefers setting strings directly
+                const cookieStrings = [
                     `auth_token=${config.twitter.authToken}; Domain=.twitter.com; Path=/; Secure; HttpOnly`,
-                    `ct0=${config.twitter.ct0}; Domain=.twitter.com; Path=/; Secure`,
+                    `ct0=${config.twitter.ct0}; Domain=.twitter.com; Path=/; Secure`
                 ];
+                await scraper.setCookies(cookieStrings);
 
-                await scraper.setCookies(cookies);
-
-                // Verify login worked
-                const isValid = await scraper.isLoggedIn();
-                if (isValid) {
-                    isLoggedIn = true;
-                    console.log('   ✅ Cookie authentication successful');
-                } else {
-                    console.warn('   ⚠️  Cookies may be expired, trying guest mode...');
+                // Verify
+                isLoggedIn = await scraper.isLoggedIn();
+                if (isLoggedIn) {
+                    console.log('   ✅ Cookie Login Successful');
+                    return true;
                 }
-            } catch (cookieError) {
-                console.warn('   ⚠️  Cookie auth failed:', cookieError.message);
+            } catch (e) {
+                console.warn('   ⚠️ Cookie auth failed:', e.message);
             }
         }
-        // Try username/password auth as fallback
-        else if (config.twitter.username && config.twitter.password) {
-            console.log('   🔑 Trying password login...');
+
+        // 2. Try User/Pass Auth (Fallback)
+        if (!isLoggedIn && config.twitter.username && config.twitter.password) {
+            console.log('   🔑 Logging in with password...');
             try {
                 await scraper.login(
                     config.twitter.username,
                     config.twitter.password,
                     config.twitter.email
                 );
-                isLoggedIn = true;
-                console.log('   ✅ Logged in as @' + config.twitter.username);
-            } catch (loginError) {
-                console.warn('   ⚠️  Password login failed:', loginError.message);
-                console.log('   💡 Tip: Use cookie auth instead (see .env.example)');
+                isLoggedIn = await scraper.isLoggedIn();
+                if (isLoggedIn) console.log('   ✅ Password Login Successful');
+            } catch (e) {
+                console.error('   ❌ Login failed:', e.message);
             }
-        }
-
-        if (!isLoggedIn) {
-            console.log('   📡 Running in guest mode (limited access)');
         }
 
         console.log('✅ Twitter scraper initialized');
